@@ -15,6 +15,7 @@ circular-buffer: template code for implementing delays
 */
 
 #include <Bela.h>
+#include <cmath> // floorf, fmodf
 #include <libraries/Gui/Gui.h>
 #include <libraries/GuiController/GuiController.h>
 #include <vector>
@@ -27,7 +28,7 @@ std::vector<float> gDelayBuffer[2];
 
 // Pointers for the circular Buffer
 unsigned int gWritePointer = 0;
-unsigned int gReadPointer = 0;
+float gReadPointer = 0; // float since it will be used for interpolation
 
 // Browser-based GUI to adjust parameters
 Gui gGui;
@@ -59,25 +60,37 @@ void render(BelaContext *context, void *userData) {
   float pDelayFeedbackLevel = gGuiController.getSliderValue(2); // Level of feedback
   float pDelayLevelPre = gGuiController.getSliderValue(3);	// Level of pre-delay input
 
-  int delayInSamples = pDelayTime * context->audioSampleRate;
-  gReadPointer = (gWritePointer - delayInSamples + gDelayBufferSize) % gDelayBufferSize;
+  // fractionary Delay in samples. Subtract 3 samples to the delay pointer to make sure we have enough previous sampels to interpolate with
+  // TODO add LFO here
+  float delayInSamples = pDelayTime * context->audioSampleRate;
+  gReadPointer = fmodf(((float)gWritePointer - (float)delayInSamples + (float)gDelayBufferSize - 3.0), (float)gDelayBufferSize); // % only defined for integeers 
+
+  float in[gNumChannels];
+  float out[gNumChannels];
+  float interpolatedReadPointer = 0.0;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
-    float in[gNumChannels];
-    float out[gNumChannels];
 
     //  Now we can write it into the delay buffer
     for (unsigned int i = 0; i < gNumChannels; i++) {
 
       in[i] = audioRead(context, n, i);
 
+      // Use linear interpolation to read a fractional index into the buffer. (necessary in case the delay is very small and for vibratto) Find the
+      // fraction by which the read pointer sits between two samples and use this to adjust weights of the samples
+      float fraction = gReadPointer - floorf(gReadPointer);
+      int previousSample = (int)floorf(gReadPointer);
+      int nextSample = (previousSample + 1) % gDelayBufferSize;
+      interpolatedReadPointer = fraction * gDelayBuffer[i][nextSample] + (1.0 - fraction) * gDelayBuffer[i][previousSample];
+
       // The output is the input plus the contents of the delay buffer (weighted by the mix levels)
-      out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * gDelayBuffer[i][gReadPointer];
+      out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * gDelayBuffer[i][interpolatedReadPointer];
 
       // Calculate the sample that gets written into the delay buffer (sum 1. and 2.)
-      // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre). 
-      // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[gReadPointer]) by the feedback level parameter (pDelayFeedbackLevel).
-      gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * gDelayBuffer[i][gReadPointer];
+      // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre).
+      // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[interpolatedReadPointer]) by the feedback level parameter
+      // (pDelayFeedbackLevel).
+      gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * gDelayBuffer[i][interpolatedReadPointer];
 
       // Write the current sample in the audio output
       audioWrite(context, n, 0, out[i]);
@@ -86,7 +99,7 @@ void render(BelaContext *context, void *userData) {
     // Increase pointer value. If the pointer is at the end of the buffer, wrap
     // it to 0 (circular buffer)
     gWritePointer = (gWritePointer + 1) % gDelayBufferSize;
-    gReadPointer = (gReadPointer + 1) % gDelayBufferSize;
+    gReadPointer = fmodf(((float)gReadPointer + 1.0), (float)gDelayBufferSize); 
   }
 }
 
@@ -96,5 +109,6 @@ void cleanup(BelaContext *context, void *userData) {}
 // x github
 // o file reading and store to file : not necessary since the project is rt
 // x filter parameters
-// _ interpolation
+// x interpolation
+// _ vibratto
 // _ doppler effect
