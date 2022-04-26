@@ -18,6 +18,7 @@ circular-buffer: template code for implementing delays
 #include <cmath> // floorf, fmodf
 #include <libraries/Gui/Gui.h>
 #include <libraries/GuiController/GuiController.h>
+#include <libraries/math_neon/math_neon.h>
 #include <vector>
 
 // Delay Buffer
@@ -34,6 +35,12 @@ float gReadPointer = 0; // float since it will be used for interpolation
 Gui gGui;
 GuiController gGuiController;
 
+// Vibrato LFO parameters
+
+// Helpers
+float gPhase;
+float gInverseSampleRate;
+
 bool setup(BelaContext *context, void *userData) {
 
   // Initialise GUI sliders
@@ -42,6 +49,10 @@ bool setup(BelaContext *context, void *userData) {
   gGuiController.addSlider("Wet mix (amount of undelayed singal in input)", 0.1, 0, 1, 0);
   gGuiController.addSlider("Feedback Level", 0.999, 0, 1, 0);
   gGuiController.addSlider("Pre-delay level", 0.75, 0, 1, 0);
+  gGuiController.addSlider("Vibrato LFO frequency in Hz", 10, 0, 20, 0);
+
+  // Precalc inverse sample rate
+  gInverseSampleRate = 1.0 / context->audioSampleRate;
 
   // Allocate memory for the circular buffer (0.5s)
   gDelayBufferSize = gMaxDelayTime * context->audioSampleRate; // Initialised here since it depends on the sample rate
@@ -55,15 +66,17 @@ bool setup(BelaContext *context, void *userData) {
 void render(BelaContext *context, void *userData) {
 
   // Delay parameters from GUI
-  float pDelayTime = gGuiController.getSliderValue(0);
+  float pDelayTime = gGuiController.getSliderValue(0); // This is also sweepwidth
   float pDelayWetMix = gGuiController.getSliderValue(1);
-  float pDelayFeedbackLevel = gGuiController.getSliderValue(2); // Level of feedback
-  float pDelayLevelPre = gGuiController.getSliderValue(3);	// Level of pre-delay input
+  float pDelayFeedbackLevel = gGuiController.getSliderValue(2);	 // Level of feedback
+  float pDelayLevelPre = gGuiController.getSliderValue(3);	 // Level of pre-delay input
+  float pVibratoLFOFrequency = gGuiController.getSliderValue(4); // LFO vibrato frequency
 
   // fractionary Delay in samples. Subtract 3 samples to the delay pointer to make sure we have enough previous sampels to interpolate with
   // TODO add LFO here
-  float delayInSamples = pDelayTime * context->audioSampleRate;
-  gReadPointer = fmodf(((float)gWritePointer - (float)delayInSamples + (float)gDelayBufferSize - 3.0), (float)gDelayBufferSize); // % only defined for integeers 
+  float delayInSamples = (pDelayTime * context->audioSampleRate) * (0.5f + 0.5f * sinf_neon(gPhase * 2.0 * M_PI));
+  gReadPointer =
+      fmodf(((float)gWritePointer - (float)delayInSamples + (float)gDelayBufferSize - 3.0), (float)gDelayBufferSize); // % only defined for integeers
 
   float in[gNumChannels];
   float out[gNumChannels];
@@ -99,7 +112,13 @@ void render(BelaContext *context, void *userData) {
     // Increase pointer value. If the pointer is at the end of the buffer, wrap
     // it to 0 (circular buffer)
     gWritePointer = (gWritePointer + 1) % gDelayBufferSize;
-    gReadPointer = fmodf(((float)gReadPointer + 1.0), (float)gDelayBufferSize); 
+    gReadPointer = fmodf(((float)gReadPointer + 1.0), (float)gDelayBufferSize);
+
+    // Update the LFO phase, keeping it in the range 0-1
+    gPhase += pVibratoLFOFrequency * gInverseSampleRate;
+    if (gPhase > 1.0) {
+      gPhase -= 1.0;
+    }
   }
 }
 
@@ -110,5 +129,5 @@ void cleanup(BelaContext *context, void *userData) {}
 // o file reading and store to file : not necessary since the project is rt
 // x filter parameters
 // x interpolation
-// _ vibratto
+// x vibratto
 // _ doppler effect
