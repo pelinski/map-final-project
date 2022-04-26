@@ -33,16 +33,15 @@ unsigned int gReadPointer = 0;
 Gui gGui;
 GuiController gGuiController;
 
-// Parameters
-float gDelayAmount = 1.0;     // Amount of delay
-float gFB = 0.999;            // gDelayFeedbackAmount // Amount of feedback
-float gDelayAmountPre = 0.75; // Level of pre-delay input
-float gDryMix = 0.2;
-
 bool setup(BelaContext *context, void *userData) {
-  // guiController Initialise
+
+  // Initialise GUI sliders
   gGui.setup(context->projectName);
   gGuiController.addSlider("Delay in s", 0.1, 0, gMaxDelayTime, 0);
+  gGuiController.addSlider("Wet mix (amount of undelayed singal in input)", 0.1, 0, 1, 0);
+  gGuiController.addSlider("Feedback Level", 0.999, 0, 1, 0);
+  gGuiController.addSlider("Delay Level", 1.0, 0, 1, 0);
+  gGuiController.addSlider("Pre-delay level", 0.75, 0, 1, 0);
 
   // Allocate memory for the circular buffer (0.5s)
   gDelayBufferSize = gMaxDelayTime * context->audioSampleRate; // Initialised here since it depends on the sample rate
@@ -54,9 +53,15 @@ bool setup(BelaContext *context, void *userData) {
 }
 
 void render(BelaContext *context, void *userData) {
-  // now delay is controlled in gui, read at every render iteration
-  float delayInS = gGuiController.getSliderValue(0);
-  int delayInSamples = delayInS * context->audioSampleRate;
+
+  // Delay parameters from GUI
+  float pDelayTime = gGuiController.getSliderValue(0);
+  float pDelayWetMix = gGuiController.getSliderValue(1);
+  float pDelayFeedbackLevel = gGuiController.getSliderValue(2); // Level of feedback
+  float pDelayLevel = gGuiController.getSliderValue(3);		// Level of delay
+  float pDelayLevelPre = gGuiController.getSliderValue(4);	// Level of pre-delay input
+
+  int delayInSamples = pDelayTime * context->audioSampleRate;
   gReadPointer = (gWritePointer - delayInSamples + gDelayBufferSize) % gDelayBufferSize;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
@@ -65,18 +70,18 @@ void render(BelaContext *context, void *userData) {
 
     //  Now we can write it into the delay buffer
     for (unsigned int i = 0; i < gNumChannels; i++) {
+
       in[i] = audioRead(context, n, i);
 
-      // Calculate the sample that will be written into the delay buffer...
-      // 1. Multiply the current (dry) sample by the pre-delay gain level (set
-      // above)
-      // 2. Get the previously delayed sample from the buffer, multiply it by
-      // the feedback gain and add it to the current sample
-      gDelayBuffer[i][gWritePointer] = gDelayAmountPre * in[i] + gDelayBuffer[i][gReadPointer] * gFB;
-      // Get the delayed sample (by reading `gDelayInSamples` many samples
-      // behind our current write pointer) and add it to our output sample
-      out[i] = gDryMix * in[i] + gDelayBuffer[i][gReadPointer] * gDelayAmount;
-      // Write to output channels
+      // The output is the input plus the contents of the delay buffer (weighted by the mix levels)
+      out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * gDelayBuffer[i][gReadPointer];
+
+      // Calculate the sample that gets written into the delay buffer (sum 1. and 2.)
+      // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre). 
+      // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[gReadPointer]) by the feedback level parameter (pDelayFeedbackLevel).
+      gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * gDelayBuffer[i][gReadPointer];
+
+      // Write the current sample in the audio output
       audioWrite(context, n, 0, out[i]);
     }
 
@@ -92,6 +97,6 @@ void cleanup(BelaContext *context, void *userData) {}
 // TODO
 // x github
 // o file reading and store to file : not necessary since the project is rt
-// _ filter parameters
+// x filter parameters
 // _ interpolation
 // _ doppler effect
