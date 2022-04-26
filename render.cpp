@@ -80,7 +80,7 @@ void render(BelaContext *context, void *userData) {
 
   float in[gNumChannels];
   float out[gNumChannels];
-  float interpolatedReadPointer = 0.0;
+  float interpolatedSample = 0.0;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
 
@@ -94,17 +94,17 @@ void render(BelaContext *context, void *userData) {
       float fraction = gReadPointer - floorf(gReadPointer);
       int previousSample = (int)floorf(gReadPointer);
       int nextSample = (previousSample + 1) % gDelayBufferSize;
-      interpolatedReadPointer = fraction * gDelayBuffer[i][nextSample] + (1.0 - fraction) * gDelayBuffer[i][previousSample];
+      interpolatedSample = fraction * gDelayBuffer[i][nextSample] + (1.0 - fraction) * gDelayBuffer[i][previousSample];
 
       // The output is the input plus the contents of the delay buffer (weighted by the mix levels)
-      out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * gDelayBuffer[i][interpolatedReadPointer];
+      out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * interpolatedSample;
 
       // Calculate the sample that gets written into the delay buffer (sum 1. and 2.)
       // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre).
       // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[interpolatedReadPointer]) by the feedback level parameter
       // (pDelayFeedbackLevel).
       // ???? IS THIS FLANGER???
-      gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * gDelayBuffer[i][interpolatedReadPointer];
+      gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * interpolatedSample;
 
       // Write the current sample in the audio output
       audioWrite(context, n, 0, out[i]);
