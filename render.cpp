@@ -40,7 +40,6 @@ bool setup(BelaContext *context, void *userData) {
   gGuiController.addSlider("Delay in s", 0.1, 0, gMaxDelayTime, 0);
   gGuiController.addSlider("Wet mix (amount of undelayed singal in input)", 0.1, 0, 1, 0);
   gGuiController.addSlider("Feedback Level", 0.999, 0, 1, 0);
-  gGuiController.addSlider("Delay Level", 1.0, 0, 1, 0);
   gGuiController.addSlider("Pre-delay level", 0.75, 0, 1, 0);
 
   // Allocate memory for the circular buffer (0.5s)
@@ -58,8 +57,7 @@ void render(BelaContext *context, void *userData) {
   float pDelayTime = gGuiController.getSliderValue(0);
   float pDelayWetMix = gGuiController.getSliderValue(1);
   float pDelayFeedbackLevel = gGuiController.getSliderValue(2); // Level of feedback
-  float pDelayLevel = gGuiController.getSliderValue(3);		// Level of delay
-  float pDelayLevelPre = gGuiController.getSliderValue(4);	// Level of pre-delay input
+  float pDelayLevelPre = gGuiController.getSliderValue(3);	// Level of pre-delay input
 
   int delayInSamples = pDelayTime * context->audioSampleRate;
   gReadPointer = (gWritePointer - delayInSamples + gDelayBufferSize) % gDelayBufferSize;
