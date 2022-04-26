@@ -103,6 +103,7 @@ void render(BelaContext *context, void *userData) {
       // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre).
       // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[interpolatedReadPointer]) by the feedback level parameter
       // (pDelayFeedbackLevel).
+      // ???? IS THIS FLANGER???
       gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * gDelayBuffer[i][interpolatedReadPointer];
 
       // Write the current sample in the audio output
