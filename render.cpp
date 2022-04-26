@@ -31,11 +31,22 @@ std::vector<float> gDelayBuffer[2];
 unsigned int gWritePointer = 0;
 float gReadPointer = 0; // float since it will be used for interpolation
 
-// Browser-based GUI to adjust parameters
+// Browser-based GUI to adjust parameters (parameters controlled from GUI start by p)
 Gui gGui;
 GuiController gGuiController;
 
-// Vibrato LFO parameters
+// Delay parameters from GUI
+float pDelayTime; // This is also sweepwidth
+float pDelayWetMix;
+float pDelayFeedbackLevel;  // Level of feedback
+float pDelayLevelPre;	    // Level of pre-delay input
+float pVibratoLFOFrequency; // LFO vibrato frequency
+
+// Doppler effect parameters
+float gDelta; // Growth parameter, derivative of the time-varying delay
+float pSoundSpeed;
+float pSourceSpeed;   // Velocity with which the source moves towards the listener
+float pListenerSpeed; // Velocity with which the listener moves towards the source
 
 // Helpers
 float gPhase;
@@ -50,6 +61,9 @@ bool setup(BelaContext *context, void *userData) {
   gGuiController.addSlider("Feedback Level", 0.999, 0, 1, 0);
   gGuiController.addSlider("Pre-delay level", 0.75, 0, 1, 0);
   gGuiController.addSlider("Vibrato LFO frequency in Hz", 10, 0, 20, 0);
+  gGuiController.addSlider("Sound speed in m/s", 340.0, 0, 500, 0);
+  gGuiController.addSlider("Source speed in m/s", 20, 0, 200, 0);
+  gGuiController.addSlider("Listener speed in m/s", 10, 0, 200, 0);
 
   // Precalc inverse sample rate
   gInverseSampleRate = 1.0 / context->audioSampleRate;
@@ -66,14 +80,19 @@ bool setup(BelaContext *context, void *userData) {
 void render(BelaContext *context, void *userData) {
 
   // Delay parameters from GUI
-  float pDelayTime = gGuiController.getSliderValue(0); // This is also sweepwidth
-  float pDelayWetMix = gGuiController.getSliderValue(1);
-  float pDelayFeedbackLevel = gGuiController.getSliderValue(2);	 // Level of feedback
-  float pDelayLevelPre = gGuiController.getSliderValue(3);	 // Level of pre-delay input
-  float pVibratoLFOFrequency = gGuiController.getSliderValue(4); // LFO vibrato frequency
+  pDelayTime = gGuiController.getSliderValue(0); // This is also sweepwidth
+  pDelayWetMix = gGuiController.getSliderValue(1);
+  pDelayFeedbackLevel = gGuiController.getSliderValue(2);  // Level of feedback
+  pDelayLevelPre = gGuiController.getSliderValue(3);	   // Level of pre-delay input
+  pVibratoLFOFrequency = gGuiController.getSliderValue(4); // LFO vibrato frequency
+  pSoundSpeed = gGuiController.getSliderValue(5);
+  pSourceSpeed = gGuiController.getSliderValue(6);
+  pListenerSpeed = gGuiController.getSliderValue(7);
+
+  // Calculate the delay growth rate (derivative of the time-varying delay)
+  gDelta = -(pListnerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
 
   // fractionary Delay in samples. Subtract 3 samples to the delay pointer to make sure we have enough previous sampels to interpolate with
-  // TODO add LFO here
   float delayInSamples = (pDelayTime * context->audioSampleRate) * (0.5f + 0.5f * sinf_neon(gPhase * 2.0 * M_PI));
   gReadPointer =
       fmodf(((float)gWritePointer - (float)delayInSamples + (float)gDelayBufferSize - 3.0), (float)gDelayBufferSize); // % only defined for integeers
@@ -112,8 +131,9 @@ void render(BelaContext *context, void *userData) {
 
     // Increase pointer value. If the pointer is at the end of the buffer, wrap
     // it to 0 (circular buffer)
-    gWritePointer = (gWritePointer + 1) % gDelayBufferSize;
-    gReadPointer = fmodf(((float)gReadPointer + 1.0), (float)gDelayBufferSize);
+    gWritePointer = (gWritePointer + 1) % gDelayBufferSize; // is an integer so it will always wrap around strictly to 0
+    gReadPointer =
+	fmodf(((float)gReadPointer + 1.0 - gDelta), (float)gDelayBufferSize); // read pointer is fractional so may wrap around a fractional value
 
     // Update the LFO phase, keeping it in the range 0-1
     gPhase += pVibratoLFOFrequency * gInverseSampleRate;
@@ -131,4 +151,5 @@ void cleanup(BelaContext *context, void *userData) {}
 // x filter parameters
 // x interpolation
 // x vibratto
-// _ doppler effect
+// x doppler effect
+// _ multiple sources where each source produces its own doppler effect
