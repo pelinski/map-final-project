@@ -90,7 +90,7 @@ void render(BelaContext *context, void *userData) {
   pListenerSpeed = gGuiController.getSliderValue(7);
 
   // Calculate the delay growth rate (derivative of the time-varying delay)
-  gDelta = -(pListnerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
+  gDelta = -(pListenerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
 
   // fractionary Delay in samples. Subtract 3 samples to the delay pointer to make sure we have enough previous sampels to interpolate with
   float delayInSamples = (pDelayTime * context->audioSampleRate) * (0.5f + 0.5f * sinf_neon(gPhase * 2.0 * M_PI));
