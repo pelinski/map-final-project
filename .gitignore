@@ -1,0 +1,14 @@
+# build directories
+build/
+
+# ignore compiled files without extension
+*
+!*.cpp
+!*.h
+!*.json
+!*.js
+!*.wav
+!*.*
+
+
+.vscode/*
