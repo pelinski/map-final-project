@@ -21,6 +21,8 @@ circular-buffer: template code for implementing delays
 #include <libraries/math_neon/math_neon.h>
 #include <vector>
 
+int gAudioFramesPerAnalogFrame = 0;
+
 // Delay Buffer
 unsigned int gDelayBufferSize; // in samples
 unsigned int gNumChannels = 2;
@@ -56,6 +58,7 @@ bool setup(BelaContext *context, void *userData) {
 
   // Initialise GUI sliders
   gGui.setup(context->projectName);
+  gGuiController.setup(&gGui, "Controls");
   gGuiController.addSlider("Delay in s", 0.1, 0, gMaxDelayTime, 0);
   gGuiController.addSlider("Wet mix (amount of undelayed singal in input)", 0.1, 0, 1, 0);
   gGuiController.addSlider("Feedback Level", 0.999, 0, 1, 0);
@@ -74,6 +77,9 @@ bool setup(BelaContext *context, void *userData) {
     gDelayBuffer[i].resize(gDelayBufferSize);
   }
 
+  if (context->analogFrames)
+    gAudioFramesPerAnalogFrame = context->audioFrames / context->analogFrames;
+
   return true;
 }
 
@@ -90,7 +96,7 @@ void render(BelaContext *context, void *userData) {
   pListenerSpeed = gGuiController.getSliderValue(7);
 
   // Calculate the delay growth rate (derivative of the time-varying delay)
-  gDelta = -(pListenerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
+  // gDelta = -(pListenerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
 
   // fractionary Delay in samples. Subtract 3 samples to the delay pointer to make sure we have enough previous sampels to interpolate with
   float delayInSamples = (pDelayTime * context->audioSampleRate) * (0.5f + 0.5f * sinf_neon(gPhase * 2.0 * M_PI));
@@ -105,8 +111,13 @@ void render(BelaContext *context, void *userData) {
 
     //  Now we can write it into the delay buffer
     for (unsigned int i = 0; i < gNumChannels; i++) {
-
-      in[i] = audioRead(context, n, i);
+      if (gAudioFramesPerAnalogFrame && !(n % gAudioFramesPerAnalogFrame)) {
+	// read analog inputs and update frequency and amplitude
+	// Depending on the sampling rate of the analog inputs, this will
+	// happen every audio frame (if it is 44100)
+	// or every two audio frames (if it is 22050)
+	in[i] = audioRead(context, n / gAudioFramesPerAnalogFrame, i);
+      }
 
       // Use linear interpolation to read a fractional index into the buffer. (necessary in case the delay is very small and for vibratto) Find the
       // fraction by which the read pointer sits between two samples and use this to adjust weights of the samples
@@ -117,7 +128,8 @@ void render(BelaContext *context, void *userData) {
 
       // The output is the input plus the contents of the delay buffer (weighted by the mix levels)
       out[i] = (1 - pDelayWetMix) * in[i] + pDelayWetMix * interpolatedSample;
-
+      // test bypass
+      out[i] = in[i];
       // Calculate the sample that gets written into the delay buffer (sum 1. and 2.)
       // 1. Multiply the current (dry) sample (in) by the pre-delay level parameter (pDelayLevelPre).
       // 2. Multiply the previously delayed sample from the buffer (gDelayBuffer[interpolatedReadPointer]) by the feedback level parameter
@@ -126,15 +138,15 @@ void render(BelaContext *context, void *userData) {
       gDelayBuffer[i][gWritePointer] = pDelayLevelPre * in[i] + pDelayFeedbackLevel * interpolatedSample;
 
       // Write the current sample in the audio output
-      audioWrite(context, n, 0, out[i]);
+      audioWrite(context, n, i, out[i]);
     }
 
     // Increase pointer value. If the pointer is at the end of the buffer, wrap
     // it to 0 (circular buffer)
     gWritePointer = (gWritePointer + 1) % gDelayBufferSize; // is an integer so it will always wrap around strictly to 0
-    gReadPointer =
-	fmodf(((float)gReadPointer + 1.0 - gDelta), (float)gDelayBufferSize); // read pointer is fractional so may wrap around a fractional value
-
+							    // gReadPointer =
+    // fmodf(((float)gReadPointer + 1.0 - gDelta), (float)gDelayBufferSize); // read pointer is fractional so may wrap around a fractional value
+    gReadPointer = fmodf(((float)gReadPointer + 1.0), (float)gDelayBufferSize);
     // Update the LFO phase, keeping it in the range 0-1
     gPhase += pVibratoLFOFrequency * gInverseSampleRate;
     if (gPhase > 1.0) {
@@ -151,5 +163,5 @@ void cleanup(BelaContext *context, void *userData) {}
 // x filter parameters
 // x interpolation
 // x vibratto
-// x doppler effect
+// _ doppler effect: not working
 // _ multiple sources where each source produces its own doppler effect
