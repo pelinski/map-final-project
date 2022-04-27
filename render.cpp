@@ -21,8 +21,6 @@ circular-buffer: template code for implementing delays
 #include <libraries/math_neon/math_neon.h>
 #include <vector>
 
-int gAudioFramesPerAnalogFrame = 0;
-
 // Delay Buffer
 unsigned int gDelayBufferSize; // in samples
 unsigned int gNumChannels = 2;
@@ -77,9 +75,6 @@ bool setup(BelaContext *context, void *userData) {
     gDelayBuffer[i].resize(gDelayBufferSize);
   }
 
-  if (context->analogFrames)
-    gAudioFramesPerAnalogFrame = context->audioFrames / context->analogFrames;
-
   return true;
 }
 
@@ -109,15 +104,9 @@ void render(BelaContext *context, void *userData) {
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
 
-    //  Now we can write it into the delay buffer
     for (unsigned int i = 0; i < gNumChannels; i++) {
-      if (gAudioFramesPerAnalogFrame && !(n % gAudioFramesPerAnalogFrame)) {
-	// read analog inputs and update frequency and amplitude
-	// Depending on the sampling rate of the analog inputs, this will
-	// happen every audio frame (if it is 44100)
-	// or every two audio frames (if it is 22050)
-	in[i] = audioRead(context, n / gAudioFramesPerAnalogFrame, i);
-      }
+
+      in[i] = audioRead(context, n, i);
 
       // Use linear interpolation to read a fractional index into the buffer. (necessary in case the delay is very small and for vibratto) Find the
       // fraction by which the read pointer sits between two samples and use this to adjust weights of the samples
