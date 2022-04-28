@@ -43,10 +43,10 @@ float pDelayFeedbackLevel; // Level of feedback
 float pVibratoLFOFrequency; // LFO vibrato frequency
 
 // Doppler effect parameters
-float gDelta; // Growth parameter, derivative of the time-varying delay
-float pSoundSpeed;
-float pSourceSpeed;   // Velocity with which the source moves towards the listener
-float pListenerSpeed; // Velocity with which the listener moves towards the source
+// float gDelta; // Growth parameter, derivative of the time-varying delay
+// float pSoundSpeed;
+// float pSourceSpeed;   // Velocity with which the source moves towards the listener
+// float pListenerSpeed; // Velocity with which the listener moves towards the source
 
 // Helpers
 float gPhase;
@@ -62,9 +62,9 @@ bool setup(BelaContext *context, void *userData) {
   gGuiController.addSlider("Feedback Level", 0.2, 0, 1, 0);
   // gGuiController.addSlider("Pre-delay level", 0.75, 0, 1, 0);
   gGuiController.addSlider("Vibrato LFO frequency in Hz", 10, 0, 20, 0);
-  gGuiController.addSlider("Sound speed in m/s", 340.0, 0, 500, 0);
-  gGuiController.addSlider("Source speed in m/s", 20, 0, 200, 0);
-  gGuiController.addSlider("Listener speed in m/s", 10, 0, 200, 0);
+  // gGuiController.addSlider("Sound speed in m/s", 340.0, 0, 500, 0);
+  // gGuiController.addSlider("Source speed in m/s", 20, 0, 200, 0);
+  // gGuiController.addSlider("Listener speed in m/s", 10, 0, 200, 0);
 
   // Precalc inverse sample rate
   gInverseSampleRate = 1.0 / context->audioSampleRate;
@@ -86,9 +86,9 @@ void render(BelaContext *context, void *userData) {
   pDelayFeedbackLevel = gGuiController.getSliderValue(2); // Level of feedback
   // pDelayLevelPre = gGuiController.getSliderValue(3);	   // Level of pre-delay input
   pVibratoLFOFrequency = gGuiController.getSliderValue(3); // LFO vibrato frequency
-  pSoundSpeed = gGuiController.getSliderValue(4);
-  pSourceSpeed = gGuiController.getSliderValue(5);
-  pListenerSpeed = gGuiController.getSliderValue(6);
+  // pSoundSpeed = gGuiController.getSliderValue(4);
+  // pSourceSpeed = gGuiController.getSliderValue(5);
+  // pListenerSpeed = gGuiController.getSliderValue(6);
 
   // Calculate the delay growth rate (derivative of the time-varying delay)
   // gDelta = -(pListenerSpeed + pSourceSpeed) / (pSourceSpeed - pSourceSpeed);
