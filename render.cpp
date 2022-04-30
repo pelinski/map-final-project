@@ -32,7 +32,7 @@ extern float gTTconfidence;
 extern "C" {
 int aubio_beat_tracker_setup(float sampleRate);
 void process_block(fvec_t *ibuf, fvec_t *obuf);
-void aubio_tempo_tracking_render(BelaContext *context, void *userData, unsigned int ch);
+void aubio_tempo_tracking_render(float *gBeatTrackerBuffer, int gBeatTrackerBufferSizeh);
 };
 
 // Delay Buffer
@@ -58,33 +58,29 @@ float pVibratoLFOFrequency; // LFO vibrato frequency
 // Helpers
 float gPhase = 0;
 float gInverseSampleRate;
-int gAudioSampleRate; // save context->audioSampleRate here to pass it to the aubio thread
+unsigned int gAudioSampleRate; // save context->audioSampleRate here to pass it to the aubio thread
 
 // Beat tracking
-std::vector<float> gBeatTrackerBuffer;
-unsigned int gBeatTrackerBufferSize = 1024;
-int gBeatTrackerBufferPointer = 0;
 AuxiliaryTask gBeatTrackerTask;
-int gCachedInputBufferPointer = 0;
+// std::vector<float> gBeatTrackerBuffer;
+float gBeatTrackerBuffer[1638]; // not a std::vector so that we can pass it to aubio_tempo_tracking_render (C function)
+unsigned int gBeatTrackerBufferSize = 1024;
+unsigned int gBeatTrackerHopSize = 512;
+std::vector<float> gBeatTrackerWindow;
+int gBeatTrackerBufferPointer = 0;
+int gHopCounter = 0;
 
-/// fft sample code
-// const int gFftSize = 1024; // FFT window size in samples
-// int gHopSize = 256;	   // How often we calculate a window
-// int gHopCounter = 0;
-// // Circular buffer and pointer for assembling a window of samples
-// const int gFFTBufferSize = 16384;
-// int gFFTInputBufferPointer = 0;
-// // Circular buffer for collecting the output of the overlap-add process
-// int gFFTOutputBufferWritePointer = gFftSize + gHopSize;
-// int gFFTOutputBufferReadPointer = 0;
-// // Buffer to hold the windows for FFT analysis and synthesis
-// std::vector<float> gAnalysisWindowBuffer;
-// std::vector<float> gSynthesisWindowBuffer;
-// Thread for FFT processing
+const unsigned int gBufferSize = 16384;
+std::vector<float> gInputBuffer(gBufferSize);
+std::vector<float> gOutputBuffer(gBufferSize);
+
+int gCachedInputBufferPointer = 0;
+int gOutputBufferWritePointer = 2 * gBeatTrackerHopSize; // Need one extra hop of latency to run in second thread
+int gOutputBufferReadPointer = 0;
+int gInputBufferPointer = 0;
 
 std::vector<float> process_delay(std::vector<float> in);
 void process_bt_background(void *);
-void process_bt(std::vector<float> gBeatTrackerBuffer);
 
 bool setup(BelaContext *context, void *userData) {
 
@@ -105,7 +101,7 @@ bool setup(BelaContext *context, void *userData) {
     gDelayBuffer[i].resize(gDelayBufferSize); // two channels so that it can be scaled to eg ping pong delays
   }
 
-  gBeatTrackerBuffer.resize(gBeatTrackerBufferSize);
+  // gBeatTrackerBuffer.resize(gBeatTrackerBufferSize);
   // Set up the thread for the beat tracker
   gBeatTrackerTask = Bela_createAuxiliaryTask(process_bt_background, 50, "bela-process-bt");
   // setup audio_beat_tracker
@@ -113,14 +109,12 @@ bool setup(BelaContext *context, void *userData) {
   if (ret)
     return false;
 
-  // fft sample code
-  // Calculate the window
-  // gAnalysisWindowBuffer.resize(gFftSize);
-  // for (int n = 0; n < gFftSize; n++) {
+  // // Calculate the window for BT
+  // gBeatTrackerWindow.resize(gBeatTrackerBufferSize);
+  // for (int n = 0; n < gBeatTrackerBufferSize; n++) {
   //   // Hann window
-  //   gAnalysisWindowBuffer[n] = 0.5f * (1.0f - cosf(2.0 * M_PI * n / (float)(gFftSize - 1)));
+  //   gBeatTrackerWindow[n] = 0.5f * (1.0f - cosf(2.0 * M_PI * n / (float)(gBeatTrackerBufferSize - 1)));
   // }
-  // recalculate_window(gFftSize);
 
   return true;
 }
@@ -152,49 +146,46 @@ void render(BelaContext *context, void *userData) {
     // 2. Pass through delay block
     outDelay = process_delay(in);
 
-    // 3. Store in gBeatTrackerBuffer
-    gBeatTrackerBuffer[gBeatTrackerBufferPointer] = outDelay[0]; // we only do BeatTracker on the left channel
-    // 4. Increase and wrap the pointer
-    gBeatTrackerBufferPointer = (gBeatTrackerBufferPointer + 1) % gBeatTrackerBufferSize;
-    // 5. If we filled the BTBuffer, run BeatTracker
-    if (gBeatTrackerBufferPointer == 0) {
-      // Run the beat tracking task
+    gInputBuffer[gInputBufferPointer++] = outDelay[0]; // write to input buffer
+    if (gInputBufferPointer >= gBufferSize) {
+      // Wrap the circular buffer
+      // Notice: this is not the condition for starting a new FFT
+      gInputBufferPointer = 0;
+    }
+
+    // Get the output sample from the output buffer
+    float out = gOutputBuffer[gOutputBufferReadPointer];
+
+    // Then clear the output sample in the buffer so it is ready for the next overlap-add
+    gOutputBuffer[gOutputBufferReadPointer] = 0;
+
+    // Scale the output down by the overlap factor (e.g. how many windows overlap per sample?)
+    out *= (float)gBeatTrackerHopSize / (float)gBeatTrackerBufferSize;
+
+    // Increment the read pointer in the output cicular buffer
+    gOutputBufferReadPointer++;
+    if (gOutputBufferReadPointer >= gBufferSize)
+      gOutputBufferReadPointer = 0;
+
+    // Increment the hop counter and start a new FFT if we've reached the hop size
+    if (++gHopCounter >= gBeatTrackerHopSize) {
+      gHopCounter = 0;
+
+      // TODO: start the FFT thread and pass it the appropriate
+      //       data (via global variables)
+      gCachedInputBufferPointer = gInputBufferPointer;
       Bela_scheduleAuxiliaryTask(gBeatTrackerTask);
     }
 
-    // // TODO beat tracking gives back a signal that changes the frequency of the LFO?
-
-    //// fft sample code
-    // // Store the sample ("in") in a buffer for the FFT
-    // // Increment the pointer and when full window has been
-    // // assembled, call process_bt()
-    // gBeatTrackerBuffer[gFFTInputBufferPointer] = outDelay[i];
-
-    // // Get the output sample from the output buffer
-    // float out = gFFTOutputBuffer[i][gFFTOutputBufferReadPointer];
-
-    // // Then clear the output sample in the buffer so it is ready for the next overlap-add
-    // gFFTOutputBuffer[i][gFFTOutputBufferReadPointer] = 0;
-
-    // // Scale the output down by the overlap factor (e.g. how many windows overlap per sample?)
-    // out *= (float)gHopSize / (float)gFftSize;
-
-    // // Increment the hop counter and start a new FFT if we've reached the hop size
-    // // ????? this happens twice with the channels?
-    // if (gHopCounter + 1 >= gHopSize) {
-    //   gCachedInputBufferPointer = gFFTInputBufferPointer;
-    //   Bela_scheduleAuxiliaryTask(gBeatTrackerTask);
-    // }
-
     for (unsigned int i = 0; i < gNumChannels; i++) {
       // 5. Write the output sample into the audio output
-      audioWrite(context, n, i, outDelay[i]);
+      audioWrite(context, n, i, out);
     };
 
     // fft sample code
     // Increase and wrap pointers
-    // gHopCounter = (gHopCounter + 1) % gHopSize;
-    // gFFTOutputBufferReadPointer = (gFFTOutputBufferReadPointer + 1) % gFFTBufferSize;
+    // gHopCounter = (gHopCounter + 1) % gBeatTrackerHopSize;
+    // gOutputBufferReadPointer = (gOutputBufferReadPointer + 1) % gFFTBufferSize;
     // gFFTInputBufferPointer = (gFFTInputBufferPointer + 1) % gFFTBufferSize;
   }
 }
@@ -242,47 +233,26 @@ std::vector<float> process_delay(std::vector<float> in) {
   return out;
 }
 
-void process_bt(std::vector<float> const gBeatTrackerBuffer) {
-  // aubio_tempo_tracking_render(context, userData, ch);
-
-  // get the beat from the buffer
-
-  // do the tremolo effect on the beat
-
-  //////// fft sample code
-  // static std::vector<float> unwrappedBuffer(gFftSize); // Container to hold the unwrapped values
-
-  // // Copy buffer into FFT input
-  // for (int n = 0; n < gFftSize; n++) {
-  //   // Use modulo arithmetic to calculate the circular buffer index
-  //   int circularBufferIndex = (inPointer + n - gFftSize + gFFTBufferSize) % gFFTBufferSize;
-  //   unwrappedBuffer[n] = inBuffer[circularBufferIndex] * gAnalysisWindowBuffer[n];
-  // }
-
-  // // Process the FFT based on the time domain input
-  // gFft.fft(unwrappedBuffer);
-
-  // // Robotise the output
-  // for (int n = 0; n < gFftSize; n++) {
-  //   float amplitude = gFft.fda(n);
-  //   gFft.fdr(n) = amplitude;
-  //   gFft.fdi(n) = 0;
-  // }
-
-  // // Run the inverse FFT
-  // gFft.ifft();
-
-  // // Add timeDomainOut into the output buffer
-  // for (int n = 0; n < gFftSize; n++) {
-  //   int circularBufferIndex = (outPointer + n - gFftSize + gFFTBufferSize) % gFFTBufferSize;
-  //   outBuffer[circularBufferIndex] += gFft.td(n) * gSynthesisWindowBuffer[n];
-  // }
-}
-
-// This function runs in an auxiliary task on Bela, calling process_bt
 void process_bt_background(void *) {
-  process_bt(gBeatTrackerBuffer);
+// This function runs in an auxiliary task on Bela
+
+  // unwrap beat tracker buffer
+  static float unwrappedBuffer[1024]; // Container to hold the unwrapped values
+
+  // Copy buffer into FFT input, starting one window ago
+  for (int n = 0; n < gBeatTrackerBufferSize; n++) {
+    // Use modulo arithmetic to calculate the circular buffer index
+    int circularBufferIndex = (gCachedInputBufferPointer + n - gBeatTrackerBufferSize + gBufferSize) % gBufferSize;
+    unwrappedBuffer[n] = gInputBuffer[circularBufferIndex];
+  }
+  // do something
+  aubio_tempo_tracking_render(unwrappedBuffer, gBeatTrackerBufferSize);
+
+  for (int n = 0; n < gBeatTrackerBufferSize; n++) {
+    int circularBufferIndex = (gOutputBufferWritePointer + n) % gBufferSize;
+    gOutputBuffer[circularBufferIndex] += unwrappedBuffer[n];
+  }
 
   // Update the output buffer write pointer to start at the next hop
-  // gFFTOutputBufferWritePointer = (gFFTOutputBufferWritePointer + gHopSize) % gFFTBufferSize;
+  gOutputBufferWritePointer = (gOutputBufferWritePointer + gBeatTrackerHopSize) % gBufferSize;
 }
