@@ -50,10 +50,14 @@ float gPhase = 0;
 float gInverseSampleRate;
 int gAudioSampleRate; // save context->audioSampleRate here to pass it to the aubio thread
 
-// FFT / Beat tracking
+// Beat tracking
 std::vector<float> gBeatTrackerBuffer;
 unsigned int gBeatTrackerBufferSize = 2048;
+int gBeatTrackerBufferPointer = 0;
+AuxiliaryTask gBeatTrackerTask;
+int gCachedInputBufferPointer = 0;
 
+/// fft sample code
 // const int gFftSize = 1024; // FFT window size in samples
 // int gHopSize = 256;	   // How often we calculate a window
 // int gHopCounter = 0;
@@ -67,12 +71,10 @@ unsigned int gBeatTrackerBufferSize = 2048;
 // std::vector<float> gAnalysisWindowBuffer;
 // std::vector<float> gSynthesisWindowBuffer;
 // Thread for FFT processing
-AuxiliaryTask gBeatTrackingTask;
-int gCachedInputBufferPointer = 0;
 
 std::vector<float> process_delay(std::vector<float> in);
 void process_bt_background(void *);
-void process_bt(std::vector<float> const &inBuffer, unsigned int inPointer);
+void process_bt(std::vector<float> gBeatTrackerBuffer);
 
 bool setup(BelaContext *context, void *userData) {
 
@@ -103,7 +105,7 @@ bool setup(BelaContext *context, void *userData) {
   // recalculate_window(gFftSize);
 
   // Set up the thread for the beat tracker
-  gBeatTrackingTask = Bela_createAuxiliaryTask(process_bt_background, 50, "bela-process-bt");
+  gBeatTrackerTask = Bela_createAuxiliaryTask(process_bt_background, 50, "bela-process-bt");
 
   return true;
 }
@@ -123,46 +125,31 @@ void render(BelaContext *context, void *userData) {
 			    (float)gDelayBufferSize); // mod operator % only defined for integeers, so I use fmodf instead
 
   // (in --[delay with vibrato and feedback]--> outDelay --[tremolo]--> out)
-  std::vector<float> in(2); // input signal 
-  std::vector<float> outDelay(2); // input signal after delay in 
-  std::vector<float> out(2); // final signal after delay and tremolo
-
+  std::vector<float> in(gNumChannels);	     // input signal
+  std::vector<float> outDelay(gNumChannels); // input signal after delay in
+  std::vector<float> out(gNumChannels);	     // final signal after delay and tremolo
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
     // 1. Read input audio sample
     for (unsigned int i = 0; i < gNumChannels; i++) {
       in[i] = audioRead(context, n, i);
     }
+    // 2. Pass through delay block
     outDelay = process_delay(in);
 
-    // // 2.  Write sample that gets stored in the delay buffer: input sample (current input sample, in[i]) and the current delayed sample
-    // // (interpolatedReadSample) multiplied by the feedback level
-    // // if the feedback level is 0, that is, if the written sample into the buffer is equal to in, the delay line produces a single echo
-    // // (pDelayFeedbackLevel).
-    // // ???? IS THIS FLANGER???
-    // gDelayBuffer[i][gDelayWritePointer] = in[i] + pDelayFeedbackLevel * interpolatedReadSample;
-
-    // // 3. Read delayed sample from the delay buffer
-    // // Lnear interpolation in case we have a varying delay over time (e.g. vibrato/chorus/flanger)
-    // // Use linear interpolation to read a fractional index into the buffer. (necessary in case the delay is very small and for vibratto) Find the
-    // // fraction by which the read pointer sits between two samples and use this to adjust weights of the samples
-    // float fraction = gDelayReadPointer - floorf(gDelayReadPointer);
-    // int previousSample = (int)floorf(gDelayReadPointer);
-    // int nextSample = (previousSample + 1) % gDelayBufferSize;
-    // interpolatedReadSample = fraction * gDelayBuffer[i][nextSample] + (1.0 - fraction) * gDelayBuffer[i][previousSample]; // delayed sample
-
-    // // 4. Mix input signal with output signal
-    // // The output is the input plus the contents of the delay buffer (read with the readcursor) and weighted by the mix levels
-    // outDelay[i] = pDelayDryMix * in[i] + (1 - pDelayDryMix) * interpolatedReadSample;
-    // // test bypass
-    // // outDelay[i] = in[i];
-
-    // Tremolo block
-    // Beat tracking is only done in one channel!
-    // pass buffer
+    // 3. Store in gBeatTrackerBuffer
+    gBeatTrackerBuffer[gBeatTrackerBufferPointer] = outDelay[0]; // we only do BeatTracker on the left channel
+    // 4. Increase and wrap the pointer
+    gBeatTrackerBufferPointer = (gBeatTrackerBufferPointer + 1) % gBeatTrackerBufferSize;
+    // 5. If we filled the BTBuffer, run BeatTracker
+    if (gBeatTrackerBufferPointer == 0) {
+      // Run the beat tracking task
+      Bela_scheduleAuxiliaryTask(gBeatTrackerTask);
+    }
 
     // // TODO beat tracking gives back a signal that changes the frequency of the LFO?
 
+    //// fft sample code
     // // Store the sample ("in") in a buffer for the FFT
     // // Increment the pointer and when full window has been
     // // assembled, call process_bt()
@@ -181,7 +168,7 @@ void render(BelaContext *context, void *userData) {
     // // ????? this happens twice with the channels?
     // if (gHopCounter + 1 >= gHopSize) {
     //   gCachedInputBufferPointer = gFFTInputBufferPointer;
-    //   Bela_scheduleAuxiliaryTask(gBeatTrackingTask);
+    //   Bela_scheduleAuxiliaryTask(gBeatTrackerTask);
     // }
 
     for (unsigned int i = 0; i < gNumChannels; i++) {
@@ -189,6 +176,7 @@ void render(BelaContext *context, void *userData) {
       audioWrite(context, n, i, outDelay[i]);
     };
 
+    // fft sample code
     // Increase and wrap pointers
     // gHopCounter = (gHopCounter + 1) % gHopSize;
     // gFFTOutputBufferReadPointer = (gFFTOutputBufferReadPointer + 1) % gFFTBufferSize;
@@ -239,10 +227,13 @@ std::vector<float> process_delay(std::vector<float> in) {
   return out;
 }
 
-// This function handles the FFT processing in this example once the buffer has
-// been assembled.
+void process_bt(std::vector<float> const gBeatTrackerBuffer) {
 
-void process_bt(std::vector<float> const &inBuffer, unsigned int inPointer) {
+  // get the beat from the buffer
+
+  // do the tremolo effect on the beat
+
+  //////// fft sample code
   // static std::vector<float> unwrappedBuffer(gFftSize); // Container to hold the unwrapped values
 
   // // Copy buffer into FFT input
@@ -274,7 +265,7 @@ void process_bt(std::vector<float> const &inBuffer, unsigned int inPointer) {
 
 // This function runs in an auxiliary task on Bela, calling process_bt
 void process_bt_background(void *) {
-  process_bt(gBeatTrackerBuffer, gCachedInputBufferPointer);
+  process_bt(gBeatTrackerBuffer);
 
   // Update the output buffer write pointer to start at the next hop
   // gFFTOutputBufferWritePointer = (gFFTOutputBufferWritePointer + gHopSize) % gFFTBufferSize;
