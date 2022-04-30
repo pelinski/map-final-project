@@ -23,6 +23,17 @@ circular-buffer: template code for implementing delays
 #include <vector>
 
 #include <aubio.h>
+extern float gTTLastMs;
+extern float gTTLastS;
+extern unsigned int gTTLast;
+extern float gTTbpm;
+extern float gTTconfidence;
+
+extern "C" {
+int aubio_beat_tracker_setup(float sampleRate);
+void process_block(fvec_t *ibuf, fvec_t *obuf);
+void aubio_tempo_tracking_render(BelaContext *context, void *userData, unsigned int ch);
+};
 
 // Delay Buffer
 unsigned int gDelayBufferSize; // in samples
@@ -41,8 +52,7 @@ GuiController gGuiController;
 // Delay parameters from GUI
 float pDelayTime; // This is also sweepwidth
 float pDelayDryMix;
-float pDelayFeedbackLevel; // Level of feedback
-// float pDelayLevelPre;	    // Level of pre-delay input (removed because it doesn't do much)
+float pDelayFeedbackLevel;  // Level of feedback
 float pVibratoLFOFrequency; // LFO vibrato frequency
 
 // Helpers
@@ -52,7 +62,7 @@ int gAudioSampleRate; // save context->audioSampleRate here to pass it to the au
 
 // Beat tracking
 std::vector<float> gBeatTrackerBuffer;
-unsigned int gBeatTrackerBufferSize = 2048;
+unsigned int gBeatTrackerBufferSize = 1024;
 int gBeatTrackerBufferPointer = 0;
 AuxiliaryTask gBeatTrackerTask;
 int gCachedInputBufferPointer = 0;
@@ -94,8 +104,16 @@ bool setup(BelaContext *context, void *userData) {
   for (unsigned int i = 0; i < gNumChannels; i++) {
     gDelayBuffer[i].resize(gDelayBufferSize); // two channels so that it can be scaled to eg ping pong delays
   }
-  gBeatTrackerBuffer.resize(gBeatTrackerBufferSize);
 
+  gBeatTrackerBuffer.resize(gBeatTrackerBufferSize);
+  // Set up the thread for the beat tracker
+  gBeatTrackerTask = Bela_createAuxiliaryTask(process_bt_background, 50, "bela-process-bt");
+  // setup audio_beat_tracker
+  int ret = aubio_beat_tracker_setup(context->audioSampleRate);
+  if (ret)
+    return false;
+
+  // fft sample code
   // Calculate the window
   // gAnalysisWindowBuffer.resize(gFftSize);
   // for (int n = 0; n < gFftSize; n++) {
@@ -103,9 +121,6 @@ bool setup(BelaContext *context, void *userData) {
   //   gAnalysisWindowBuffer[n] = 0.5f * (1.0f - cosf(2.0 * M_PI * n / (float)(gFftSize - 1)));
   // }
   // recalculate_window(gFftSize);
-
-  // Set up the thread for the beat tracker
-  gBeatTrackerTask = Bela_createAuxiliaryTask(process_bt_background, 50, "bela-process-bt");
 
   return true;
 }
@@ -228,6 +243,7 @@ std::vector<float> process_delay(std::vector<float> in) {
 }
 
 void process_bt(std::vector<float> const gBeatTrackerBuffer) {
+  // aubio_tempo_tracking_render(context, userData, ch);
 
   // get the beat from the buffer
 
