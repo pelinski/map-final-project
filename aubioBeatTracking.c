@@ -48,7 +48,7 @@ void aubio_beat_tracker_cleanup() {
 }
 
 // void process_block(fvec_t *in, fvec_t *obuf) {
-void process_block(fvec_t *in, fvec_t *out) {
+fvec_t *process_block(fvec_t *in, fvec_t *out) {
   // from:
   // 	https://aubio.org/doc/latest/examples_2aubiotrack_8c-example.html#a1
   //	https://aubio.org/doc/latest/tempo_2test-tempo_8c-example.html#a6
@@ -81,10 +81,11 @@ void process_block(fvec_t *in, fvec_t *out) {
 	   aubio_tempo_get_last_s(oTempo), aubio_tempo_get_last(oTempo), aubio_tempo_get_bpm(oTempo), aubio_tempo_get_confidence(oTempo),
 	   pBT_OnsetThreshold);
   }
+  return out;
 }
 
 // run as background task
-fvec_t aubio_tempo_tracking_render_bg(float *gBT_Buffer, int _gBT_BufferSize) {
+fvec_t *aubio_tempo_tracking_render_bg(float *gBT_Buffer, int _gBT_BufferSize) {
 
   aubio_tempo_set_threshold(oTempo, pBT_OnsetThreshold);
   aubio_tempo_set_silence(oTempo, pBT_SilenceThreshold);
@@ -93,9 +94,9 @@ fvec_t aubio_tempo_tracking_render_bg(float *gBT_Buffer, int _gBT_BufferSize) {
   fvec_t in = {.length = _gBT_BufferSize, .data = gBT_Buffer};
   fvec_t out = {.length = _gBT_BufferSize, .data = gBT_Buffer};
 
-  process_block(&in, &out);
+  fvec_t *_out = process_block(&in, &out);
 
-  return out;
+  return _out;
 }
 
 // run in render using only the audioframes in current audio buffer
