@@ -11,8 +11,8 @@ smpl_t isBeat = 0.;
 uint_t isSilence = 0;
 
 extern unsigned int gAudioSampleRate;
-extern unsigned int gBeatTrackerBufferSize;
-extern unsigned int gBeatTrackerHopSize;
+extern unsigned int gBT_AnalysisBufferSize;
+extern unsigned int gBT_AnalysisHopSize;
 
 float gOnsetThreshold = -20.0;
 float gSilenceThreshold = -40.0;
@@ -25,11 +25,11 @@ float gConfidence;
 int aubio_beat_tracker_setup() {
   // from: https://aubio.org/doc/latest/examples_2aubiotrack_8c-example.html#a1
 
-  printf("buffer_size: %d, ", gBeatTrackerBufferSize);
-  printf("hop_size: %d, ", gBeatTrackerHopSize);
+  printf("buffer_size: %d, ", gBT_AnalysisBufferSize);
+  printf("hop_size: %d, ", gBT_AnalysisHopSize);
   printf("onset_threshold: %f\n", gOnsetThreshold);
 
-  oTempo = new_aubio_tempo("default", gBeatTrackerBufferSize, gBeatTrackerHopSize, gAudioSampleRate);
+  oTempo = new_aubio_tempo("default", gBT_AnalysisBufferSize, gBT_AnalysisHopSize, gAudioSampleRate);
 
   if (oTempo == NULL)
     return 1;
@@ -75,9 +75,21 @@ void process_block(fvec_t *ibuf) {
   }
 }
 
-void aubio_tempo_tracking_render(float *gBeatTrackerBuffer, int gBeatTrackerBufferSize) {
-  // parse gBeatTrackerBuffer (array) into fvec_t (if gBeatTrackerBuffer is passed directly it results in Segmentation Fault)
-  fvec_t ibuf = {.length = gBeatTrackerBufferSize, .data = gBeatTrackerBuffer};
-  //   fvec_t obuf = {.length = gBeatTrackerBuffer.size(), , .data = context->audioOut};
+// run as background task
+void aubio_tempo_tracking_render_bg(float *gBT_Buffer, int gBT_AnalysisBufferSize) {
+  // parse gBT_Buffer (array) into fvec_t (if gBT_Buffer is passed directly it results in Segmentation Fault)
+
+  fvec_t ibuf = {.length = gBT_AnalysisBufferSize, .data = gBT_Buffer};
+  //   fvec_t obuf = {.length = gBT_Buffer.size(), , .data = context->audioOut};
+  process_block(&ibuf);
+}
+
+// run in render using only the audioframes in current audio buffer
+void aubio_tempo_tracking_render(BelaContext *context) {
+  smpl_t audioIn[context->audioFrames];
+  for (unsigned int n = 0; n < context->audioFrames; ++n) {
+    audioIn[n] = audioRead(context, n, 0);
+  }
+  fvec_t ibuf = {.length = context->audioFrames, .data = audioIn};
   process_block(&ibuf);
 }
