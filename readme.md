@@ -1,6 +1,8 @@
 # map-final-project
 This is a real-time delay with vibrato and a tremolo synced to the beat of the track playing. You will need a Bela board, two audio adapter cables, an AUX cable to connect your input sound source and headphones or a loudspeaker to play the output. 
 
+(disclosure: the beattracking does not work very well.......... and the sync either)
+
 ## quickstart
 Clone this project in the `Bela/projects/` folder:
 ```bash
