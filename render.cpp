@@ -20,7 +20,6 @@ Audio effects: Theory, implementation, and application. CRC Press, Taylor & Fran
 */
 
 #include "ADSR.h"
-#include "MonoFilePlayer.h"
 #include "Ramp.h"
 #include <Bela.h>
 #include <aubio.h>
