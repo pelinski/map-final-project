@@ -104,7 +104,7 @@ bool setup(BelaContext *context, void *userData) {
 	// Delay
 	gGuiController.addSlider("Delay in s", 0.1, 0, gMaxDelayTime, 0);
 	gGuiController.addSlider("Dry mix", 0.75, 0, 1, 0);
-	gGuiController.addSlider("Feedback Level", 0.2, 0, 1, 0);
+	gGuiController.addSlider("Feedback Level", 0.2, 0, 0.99, 0);
 	gGuiController.addSlider("Vibrato LFO frequency in Hz", 0.7, 0, 20, 0);
 	// Beat Tracking
 	gGuiController.addSlider("Onset threshold", -50.0, -90.0, -0.0, 0);
@@ -115,8 +115,6 @@ bool setup(BelaContext *context, void *userData) {
 	gGuiController.addSlider("Amplitude Decay time", 0.05, 0.01, 0.3, 0);
 	gGuiController.addSlider("Amplitude Sustain level", 0.3, 0, 1, 0);
 	gGuiController.addSlider("Amplitude Release time", 0.2, 0.001, 2, 0);
-	// Bypass
-	gGuiController.addSlider("Delay in s", 0, 0, 1, 1);
 
 	//__2. Precalculate helpers
 	gInverseSampleRate = 1.0 / context->audioSampleRate; // Precalc inverse sample rate
@@ -165,8 +163,6 @@ void render(BelaContext *context, void *userData) {
 	pAmpDecayTime = gGuiController.getSliderValue(8);
 	pAmpSustainLevel = gGuiController.getSliderValue(9);
 	pAmpReleaseTime = gGuiController.getSliderValue(10);
-	// Bypass
-	pByPass = gGuiController.getSliderValue(10);
 
 	//__2. Update ADSR envelope parameters
 	gAmplitudeADSR.setAttackTime(pAmpAttackTime);
@@ -187,12 +183,8 @@ void render(BelaContext *context, void *userData) {
 			in[i] = audioRead(context, n, i);
 		}
 		//__5. If bypass is off, pass first through delay block and then through tremolo block.
-		if (!pByPass) {
-			outDelay = process_delay(in);
-			out = process_tremolo(outDelay);
-		} else {
-			out = in;
-		}
+		outDelay = process_delay(in);
+		out = process_tremolo(outDelay);
 
 		//__6. Write the output sample into the audio output .......why does it click in the left channel?
 		for (unsigned int i = 0; i < gNumChannels; i++) {
@@ -293,7 +285,6 @@ std::vector<float> process_tremolo(std::vector<float> in) {
 	if (gBtBeatsBuffer[gBtOutputBuffer_ReadPointer]) {
 		gAmplitudeADSR.trigger();
 	}
-
 	//__7. Output signal is the dry delayed signal (readOut, see step 2) mixed with the same signal modulated with the tremolo ADSR
 	// envelope, that
 	// is triggered when there is a beat.
@@ -334,7 +325,7 @@ void process_BT_background(void *) {
 		};
 
 		//__4. If there is a beat detected, set the beat flag in the gBeatsBuffer. !! Currently only doing it at the first sample of each
-		//unwrappedBuffer, so the tremolo is not synced, TOFIX
+		// unwrappedBuffer, so the tremolo is not synced, TOFIX
 		if (n == 0 && _gBeatsBuffer->data[0] != 0) {
 			gBtBeatsBuffer[circularBufferIndex] = 1;
 		} else {
